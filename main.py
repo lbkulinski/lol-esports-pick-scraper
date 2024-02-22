@@ -84,6 +84,9 @@ def get_parameters(match):
 
     vod = match.get('VOD')
 
+    if vod is not None:
+        vod = vod.replace('&amp;', '&')
+
     return game_id, player, tournament, won, timestamp, vod
 
 
