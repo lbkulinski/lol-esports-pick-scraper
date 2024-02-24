@@ -100,6 +100,7 @@ def save_match(connection, match):
                         '`tournament` = VALUES(`tournament`), '
                         '`won` = VALUES(`won`), '
                         '`timestamp` = VALUES(`timestamp`), '
+                        '`notified` = `vod` <=> VALUES(`vod`), '
                         '`vod` = VALUES(`vod`)')
 
     parameters = get_parameters(match)
