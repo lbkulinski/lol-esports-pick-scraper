@@ -100,7 +100,7 @@ def save_match(cursor, match):
                         '"tournament" = EXCLUDED."tournament", '
                         '"won" = EXCLUDED."won", '
                         '"timestamp" = EXCLUDED."timestamp", '
-                        '"notified" = "jhin_picks"."vod" IS DISTINCT FROM EXCLUDED."vod", '
+                        '"notified" = "jhin_picks"."vod" IS NOT DISTINCT FROM EXCLUDED."vod", '
                         '"vod" = EXCLUDED."vod"')
 
     parameters = get_parameters(match)
