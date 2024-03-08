@@ -1,7 +1,8 @@
 import os
 
+import psycopg
+import rollbar
 from mwrogue.esports_client import EsportsClient
-import mysql.connector
 import hashlib
 import logging
 
@@ -73,7 +74,7 @@ def get_parameters(match):
 
         return None
 
-    won = 1 if won == 'Yes' else 0
+    won = won == 'Yes'
 
     timestamp = match.get('DateTime UTC')
 
@@ -90,29 +91,28 @@ def get_parameters(match):
     return game_id, player, tournament, won, timestamp, vod
 
 
-def save_match(connection, match):
-    cursor = connection.cursor()
-
-    insert_statement = ('INSERT INTO `jhin_picks` (`game_id`, `player`, `tournament`, `won`, `timestamp`, `vod`) '
+def save_match(cursor, match):
+    insert_statement = ('INSERT INTO "jhin_picks" ("game_id", "player", "tournament", "won", "timestamp", "vod") '
                         'VALUES (%s, %s, %s, %s, %s, %s) '
-                        'ON DUPLICATE KEY UPDATE `game_id` = VALUES(`game_id`), '
-                        '`player` = VALUES(`player`), '
-                        '`tournament` = VALUES(`tournament`), '
-                        '`won` = VALUES(`won`), '
-                        '`timestamp` = VALUES(`timestamp`), '
-                        '`notified` = `vod` <=> VALUES(`vod`), '
-                        '`vod` = VALUES(`vod`)')
+                        'ON CONFLICT ("game_id") DO UPDATE '
+                        'SET "game_id" = EXCLUDED."game_id", '
+                        '"player" = EXCLUDED."player", '
+                        '"tournament" = EXCLUDED."tournament", '
+                        '"won" = EXCLUDED."won", '
+                        '"timestamp" = EXCLUDED."timestamp", '
+                        '"notified" = "jhin_picks"."vod" IS DISTINCT FROM EXCLUDED."vod", '
+                        '"vod" = EXCLUDED."vod"')
 
     parameters = get_parameters(match)
 
     try:
         cursor.execute(insert_statement, parameters)
-
-        connection.commit()
-    except mysql.connector.Error as e:
+    except psycopg.Error as e:
         error_string = str(e)
 
-        print("Error:", error_string)
+        print('Error: ', error_string)
+
+        rollbar.report_exc_info()
 
 
 def save_matches(matches):
@@ -124,12 +124,12 @@ def save_matches(matches):
 
     password = os.environ['DATABASE_PASSWORD']
 
-    connection = mysql.connector.connect(user=user, password=password, host=host, database=dbname)
+    with psycopg.connect(host=host, dbname=dbname, user=user, password=password) as connection:
+        with connection.cursor() as cursor:
+            for match in matches:
+                save_match(cursor, match)
 
-    for match in matches:
-        save_match(connection, match)
-
-    connection.close()
+            connection.commit()
 
 
 def check_for_matches():
@@ -139,4 +139,27 @@ def check_for_matches():
 
 
 if __name__ == '__main__':
+    rollbar_access_token = os.environ.get('ROLLBAR_ACCESS_TOKEN')
+
+    if rollbar_access_token is None:
+        print('ROLLBAR_ACCESS_TOKEN is not set')
+
+        exit(1)
+
+    rollbar_environment = os.environ.get('ROLLBAR_ENVIRONMENT')
+
+    if rollbar_environment is None:
+        print('ROLLBAR_ENVIRONMENT is not set')
+
+        exit(1)
+
+    rollbar_code_version = os.environ.get('ROLLBAR_CODE_VERSION')
+
+    if rollbar_code_version is None:
+        print('ROLLBAR_CODE_VERSION is not set')
+
+        exit(1)
+
+    rollbar.init(access_token=rollbar_access_token, environment=rollbar_environment, code_version=rollbar_code_version)
+
     check_for_matches()
