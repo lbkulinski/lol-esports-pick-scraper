@@ -5,10 +5,11 @@ import rollbar
 from mwrogue.esports_client import EsportsClient
 import hashlib
 import logging
+from Champion import Champion
 
 
-def get_matches():
-    client = EsportsClient('lol')
+def get_matches(champion):
+    client = EsportsClient(wiki='lol', max_retries=10)
 
     tables = [
         'ScoreboardPlayers',
@@ -28,9 +29,20 @@ def get_matches():
         'ScoreboardPlayers.GameId = ScoreboardGames.GameId'
     ]
 
-    return client.cargo_client.query(tables=tables, fields=fields, join_on=join_on,
-                                     where="ScoreboardPlayers.Champion = 'Jhin'",
-                                     order_by='ScoreboardPlayers.DateTime_UTC DESC', limit=500)
+    matches = []
+
+    try:
+        matches = client.cargo_client.query(tables=tables, fields=fields, join_on=join_on,
+                                            where=f'ScoreboardPlayers.Champion = \'{champion.value}\'',
+                                            order_by='ScoreboardPlayers.DateTime_UTC DESC', limit=500)
+    except Exception as e:
+        error_string = str(e)
+
+        logging.error(error_string)
+
+        rollbar.report_exc_info()
+
+    return matches
 
 
 def get_game_id(match):
@@ -51,12 +63,16 @@ def get_parameters(match):
     if game_id is None:
         logging.error('game_id is None')
 
+        rollbar.report_message('game_id is None')
+
         return None
 
     player = match.get('Link')
 
     if player is None:
         logging.error('player is None')
+
+        rollbar.report_message('player is None')
 
         return None
 
@@ -65,12 +81,16 @@ def get_parameters(match):
     if tournament is None:
         logging.error('tournament is None')
 
+        rollbar.report_message('tournament is None')
+
         return None
 
     won = match.get('PlayerWin')
 
     if won is None:
         logging.error('won is None')
+
+        rollbar.report_message('won is None')
 
         return None
 
@@ -80,6 +100,8 @@ def get_parameters(match):
 
     if timestamp is None:
         logging.error('timestamp is None')
+
+        rollbar.report_message('timestamp is None')
 
         return None
 
@@ -91,8 +113,19 @@ def get_parameters(match):
     return game_id, player, tournament, won, timestamp, vod
 
 
-def save_match(cursor, match):
-    insert_statement = ('INSERT INTO "jhin_picks" ("game_id", "player", "tournament", "won", "timestamp", "vod") '
+def save_match(cursor, champion, match):
+    if champion == Champion.JHIN:
+        table_name = 'jhin_picks'
+    elif champion == Champion.LUCIAN:
+        table_name = 'lucian_picks'
+    else:
+        message = f'Unknown champion: {champion.value}'
+
+        rollbar.report_message(message)
+
+        return
+
+    insert_statement = (f'INSERT INTO "{table_name}" ("game_id", "player", "tournament", "won", "timestamp", "vod") '
                         'VALUES (%s, %s, %s, %s, %s, %s) '
                         'ON CONFLICT ("game_id") DO UPDATE '
                         'SET "game_id" = EXCLUDED."game_id", '
@@ -100,63 +133,102 @@ def save_match(cursor, match):
                         '"tournament" = EXCLUDED."tournament", '
                         '"won" = EXCLUDED."won", '
                         '"timestamp" = EXCLUDED."timestamp", '
-                        '"notified" = "jhin_picks"."vod" IS NOT DISTINCT FROM EXCLUDED."vod", '
+                        f'"notified" = "{table_name}"."vod" IS NOT DISTINCT FROM EXCLUDED."vod", '
                         '"vod" = EXCLUDED."vod"')
 
     parameters = get_parameters(match)
+
+    if parameters is None:
+        return
 
     try:
         cursor.execute(insert_statement, parameters)
     except psycopg.Error as e:
         error_string = str(e)
 
-        print('Error: ', error_string)
+        logging.error(error_string)
 
         rollbar.report_exc_info()
 
 
-def save_matches(matches):
-    host = os.environ['DATABASE_HOST']
+def save_matches(champion_to_matches):
+    host = os.environ.get('DATABASE_HOST')
 
-    dbname = os.environ['DATABASE_NAME']
+    if host is None:
+        logging.error('DATABASE_HOST is not set')
 
-    user = os.environ['DATABASE_USERNAME']
+        rollbar.report_message('DATABASE_HOST is not set')
 
-    password = os.environ['DATABASE_PASSWORD']
+        exit(1)
+
+    dbname = os.environ.get('DATABASE_NAME')
+
+    if dbname is None:
+        logging.error('DATABASE_NAME is not set')
+
+        rollbar.report_message('DATABASE_NAME is not set')
+
+        exit(1)
+
+    user = os.environ.get('DATABASE_USERNAME')
+
+    if user is None:
+        logging.error('DATABASE_USERNAME is not set')
+
+        rollbar.report_message('DATABASE_USERNAME is not set')
+
+        exit(1)
+
+    password = os.environ.get('DATABASE_PASSWORD')
+
+    if password is None:
+        logging.error('DATABASE_PASSWORD is not set')
+
+        rollbar.report_message('DATABASE_PASSWORD is not set')
+
+        exit(1)
 
     with psycopg.connect(host=host, dbname=dbname, user=user, password=password) as connection:
         with connection.cursor() as cursor:
-            for match in matches:
-                save_match(cursor, match)
+            for champion, matches in champion_to_matches.items():
+                for match in matches:
+                    save_match(cursor, champion, match)
 
             connection.commit()
 
 
 def check_for_matches():
-    matches = get_matches()
+    jhin_matches = get_matches(champion=Champion.JHIN)
 
-    save_matches(matches)
+    lucian_matches = get_matches(champion=Champion.LUCIAN)
+
+    champion_to_matches = {
+        Champion.JHIN: jhin_matches,
+        Champion.LUCIAN: lucian_matches
+    }
+
+    save_matches(champion_to_matches)
 
 
 if __name__ == '__main__':
     rollbar_access_token = os.environ.get('ROLLBAR_ACCESS_TOKEN')
 
     if rollbar_access_token is None:
-        print('ROLLBAR_ACCESS_TOKEN is not set')
+        logging.error('ROLLBAR_ACCESS_TOKEN is not set')
 
         exit(1)
 
     rollbar_environment = os.environ.get('ROLLBAR_ENVIRONMENT')
 
     if rollbar_environment is None:
-        print('ROLLBAR_ENVIRONMENT is not set')
+        logging.error('ROLLBAR_ENVIRONMENT is not set')
 
         exit(1)
 
     rollbar_code_version = os.environ.get('ROLLBAR_CODE_VERSION')
 
     if rollbar_code_version is None:
-        print('ROLLBAR_CODE_VERSION is not set')
+        logging.error('ROLLBAR_CODE_VERSION is not set')
 
         exit(1)
 
