@@ -114,26 +114,16 @@ def get_parameters(match):
 
 
 def save_match(cursor, champion, match):
-    if champion == Champion.JHIN:
-        table_name = 'jhin_picks'
-    elif champion == Champion.LUCIAN:
-        table_name = 'lucian_picks'
-    else:
-        message = f'Unknown champion: {champion.value}'
-
-        rollbar.report_message(message)
-
-        return
-
-    insert_statement = (f'INSERT INTO "{table_name}" ("game_id", "player", "tournament", "won", "timestamp", "vod") '
-                        'VALUES (%s, %s, %s, %s, %s, %s) '
+    insert_statement = ('INSERT INTO "esports_pick" ("game_id", "champion", "player", "tournament", "won", '
+                        '"timestamp", "vod") '
+                        f'VALUES (%s, \'{champion.value}\', %s, %s, %s, %s, %s) '
                         'ON CONFLICT ("game_id") DO UPDATE '
                         'SET "game_id" = EXCLUDED."game_id", '
                         '"player" = EXCLUDED."player", '
                         '"tournament" = EXCLUDED."tournament", '
                         '"won" = EXCLUDED."won", '
                         '"timestamp" = EXCLUDED."timestamp", '
-                        f'"notified" = "{table_name}"."vod" IS NOT DISTINCT FROM EXCLUDED."vod", '
+                        '"notified" = "esports_pick"."vod" IS NOT DISTINCT FROM EXCLUDED."vod", '
                         '"vod" = EXCLUDED."vod"')
 
     parameters = get_parameters(match)
@@ -202,9 +192,12 @@ def check_for_matches():
 
     lucian_matches = get_matches(champion=Champion.LUCIAN)
 
+    draven_matches = get_matches(champion=Champion.DRAVEN)
+
     champion_to_matches = {
         Champion.JHIN: jhin_matches,
-        Champion.LUCIAN: lucian_matches
+        Champion.LUCIAN: lucian_matches,
+        Champion.DRAVEN: draven_matches
     }
 
     save_matches(champion_to_matches)
