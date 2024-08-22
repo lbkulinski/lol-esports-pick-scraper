@@ -114,9 +114,11 @@ def get_parameters(match):
 
 
 def save_match(cursor, champion, match):
+    champion_name = str.upper(champion.value)
+
     insert_statement = ('INSERT INTO "esports_pick" ("game_id", "champion", "player", "tournament", "won", '
                         '"timestamp", "vod") '
-                        f'VALUES (%s, \'{champion.value}\', %s, %s, %s, %s, %s) '
+                        f'VALUES (%s, \'{champion_name}\', %s, %s, %s, %s, %s) '
                         'ON CONFLICT ("game_id") DO UPDATE '
                         'SET "game_id" = EXCLUDED."game_id", '
                         '"player" = EXCLUDED."player", '
